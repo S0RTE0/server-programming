@@ -1,7 +1,9 @@
 from typing import AsyncGenerator
+
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from settings.configs.app import db_settings
 
 DATABASE_URL = db_settings.DATABASE_URL
@@ -19,6 +21,7 @@ AsyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
 )
 
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
@@ -29,6 +32,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
 
 async def ping() -> bool:
     if not engine:
