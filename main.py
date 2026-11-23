@@ -1,25 +1,23 @@
 import logging
-from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, status
 
-from app.settings.db import engine, ping
-from models import Base
-from routers import game_runs_router, items_router, players_router, run_items_router
+from app.settings.db import ping
+from routers import (
+    auth_router,
+    game_runs_router,
+    items_router,
+    players_router,
+    run_items_router,
+)
+from utils.security import security
 
 logging.basicConfig(level=logging.INFO)
 
+app = FastAPI()
+security.handle_errors(app)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield
-    await engine.dispose()
-
-
-app = FastAPI(lifespan=lifespan)
-
+app.include_router(auth_router)
 app.include_router(players_router)
 app.include_router(game_runs_router)
 app.include_router(items_router)

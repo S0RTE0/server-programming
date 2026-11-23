@@ -3,25 +3,22 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.settings.db import get_db
-from models.run_item import RunItem
 from schemas.run_item import RunItemCreate, RunItemRead, RunItemUpdate
+from services.run_items import RunItemService, get_run_item_service
+from utils.security import AccessTokenDepend, AdminDepend
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/run-items", tags=["RunItems"])
 
-SessionDepend = Annotated[AsyncSession, Depends(get_db)]
+RunItemServiceDepend = Annotated[RunItemService, Depends(get_run_item_service)]
 
 
 @router.get(path="/", response_model=list[RunItemRead])
-async def get_run_items(session: SessionDepend):
+async def get_run_items(run_item_service: RunItemServiceDepend):
     try:
-        result = await session.execute(select(RunItem))
-        return result.scalars().all()
+        return await run_item_service.get_all()
     except HTTPException:
         raise
     except Exception as exc:
@@ -33,15 +30,13 @@ async def get_run_items(session: SessionDepend):
 
 
 @router.get(path="/{run_id}/{item_id}", response_model=RunItemRead)
-async def get_run_item(run_id: UUID, item_id: int, session: SessionDepend):
+async def get_run_item(
+    run_id: UUID,
+    item_id: int,
+    run_item_service: RunItemServiceDepend,
+):
     try:
-        result = await session.execute(
-            select(RunItem).where(
-                RunItem.run_id == run_id,
-                RunItem.item_id == item_id,
-            )
-        )
-        run_item = result.scalars().first()
+        run_item = await run_item_service.get_by_id(run_id=run_id, item_id=item_id)
 
         if not run_item:
             raise HTTPException(
@@ -67,13 +62,13 @@ async def get_run_item(run_id: UUID, item_id: int, session: SessionDepend):
     response_model=RunItemRead,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_run_item(run_item_data: RunItemCreate, session: SessionDepend):
+async def create_run_item(
+    run_item_data: RunItemCreate,
+    run_item_service: RunItemServiceDepend,
+    _token: AccessTokenDepend,
+):
     try:
-        new_run_item = RunItem(**run_item_data.model_dump())
-        session.add(new_run_item)
-        await session.commit()
-        await session.refresh(new_run_item)
-        return new_run_item
+        return await run_item_service.create(data=run_item_data)
     except HTTPException:
         raise
     except Exception as exc:
@@ -89,30 +84,21 @@ async def update_run_item(
     run_id: UUID,
     item_id: int,
     run_item_update: RunItemUpdate,
-    session: SessionDepend,
+    run_item_service: RunItemServiceDepend,
+    _token: AccessTokenDepend,
 ):
     try:
-        result = await session.execute(
-            select(RunItem).where(
-                RunItem.run_id == run_id,
-                RunItem.item_id == item_id,
-            )
+        run_item = await run_item_service.update(
+            run_id=run_id, item_id=item_id, data=run_item_update
         )
-        existing_run_item = result.scalars().first()
 
-        if not existing_run_item:
+        if not run_item:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="RunItem not found",
             )
 
-        for field, value in run_item_update.model_dump(exclude_unset=True).items():
-            setattr(existing_run_item, field, value)
-
-        session.add(existing_run_item)
-        await session.commit()
-        await session.refresh(existing_run_item)
-        return existing_run_item
+        return run_item
     except HTTPException:
         raise
     except Exception as exc:
@@ -129,24 +115,21 @@ async def update_run_item(
     path="/{run_id}/{item_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def delete_run_item(run_id: UUID, item_id: int, session: SessionDepend):
+async def delete_run_item(
+    run_id: UUID,
+    item_id: int,
+    run_item_service: RunItemServiceDepend,
+    _admin: AdminDepend,
+):
     try:
-        result = await session.execute(
-            select(RunItem).where(
-                RunItem.run_id == run_id,
-                RunItem.item_id == item_id,
-            )
-        )
-        existing_run_item = result.scalars().first()
+        deleted = await run_item_service.delete(run_id=run_id, item_id=item_id)
 
-        if not existing_run_item:
+        if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="RunItem not found",
             )
 
-        await session.delete(existing_run_item)
-        await session.commit()
         return
     except HTTPException:
         raise

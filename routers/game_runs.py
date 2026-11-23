@@ -3,25 +3,22 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.settings.db import get_db
-from models.game_run import GameRun
 from schemas.game_run import GameRunCreate, GameRunRead, GameRunUpdate
+from services.game_runs import GameRunService, get_game_run_service
+from utils.security import AccessTokenDepend, AdminDepend
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/game-runs", tags=["GameRuns"])
 
-SessionDepend = Annotated[AsyncSession, Depends(get_db)]
+GameRunServiceDepend = Annotated[GameRunService, Depends(get_game_run_service)]
 
 
 @router.get(path="/", response_model=list[GameRunRead])
-async def get_game_runs(session: SessionDepend):
+async def get_game_runs(game_run_service: GameRunServiceDepend):
     try:
-        result = await session.execute(select(GameRun))
-        return result.scalars().all()
+        return await game_run_service.get_all()
     except HTTPException:
         raise
     except Exception as exc:
@@ -33,10 +30,9 @@ async def get_game_runs(session: SessionDepend):
 
 
 @router.get(path="/{run_id}", response_model=GameRunRead)
-async def get_game_run(run_id: UUID, session: SessionDepend):
+async def get_game_run(run_id: UUID, game_run_service: GameRunServiceDepend):
     try:
-        result = await session.execute(select(GameRun).where(GameRun.id == run_id))
-        game_run = result.scalars().first()
+        game_run = await game_run_service.get_by_id(run_id=run_id)
 
         if not game_run:
             raise HTTPException(
@@ -60,13 +56,13 @@ async def get_game_run(run_id: UUID, session: SessionDepend):
     response_model=GameRunRead,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_game_run(run_data: GameRunCreate, session: SessionDepend):
+async def create_game_run(
+    run_data: GameRunCreate,
+    game_run_service: GameRunServiceDepend,
+    _token: AccessTokenDepend,
+):
     try:
-        new_run = GameRun(**run_data.model_dump())
-        session.add(new_run)
-        await session.commit()
-        await session.refresh(new_run)
-        return new_run
+        return await game_run_service.create(data=run_data)
     except HTTPException:
         raise
     except Exception as exc:
@@ -81,25 +77,19 @@ async def create_game_run(run_data: GameRunCreate, session: SessionDepend):
 async def update_game_run(
     run_id: UUID,
     run_update: GameRunUpdate,
-    session: SessionDepend,
+    game_run_service: GameRunServiceDepend,
+    _token: AccessTokenDepend,
 ):
     try:
-        result = await session.execute(select(GameRun).where(GameRun.id == run_id))
-        existing_run = result.scalars().first()
+        game_run = await game_run_service.update(run_id=run_id, data=run_update)
 
-        if not existing_run:
+        if not game_run:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="GameRun not found",
             )
 
-        for field, value in run_update.model_dump(exclude_unset=True).items():
-            setattr(existing_run, field, value)
-
-        session.add(existing_run)
-        await session.commit()
-        await session.refresh(existing_run)
-        return existing_run
+        return game_run
     except HTTPException:
         raise
     except Exception as exc:
@@ -114,19 +104,20 @@ async def update_game_run(
     path="/{run_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def delete_game_run(run_id: UUID, session: SessionDepend):
+async def delete_game_run(
+    run_id: UUID,
+    game_run_service: GameRunServiceDepend,
+    _admin: AdminDepend,
+):
     try:
-        result = await session.execute(select(GameRun).where(GameRun.id == run_id))
-        existing_run = result.scalars().first()
+        deleted = await game_run_service.delete(run_id=run_id)
 
-        if not existing_run:
+        if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="GameRun not found",
             )
 
-        await session.delete(existing_run)
-        await session.commit()
         return
     except HTTPException:
         raise

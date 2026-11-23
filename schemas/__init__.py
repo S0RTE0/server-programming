@@ -1,3 +1,4 @@
+from .auth import TokenResponse, UserRead, UserRegister
 from .game_run import GameRunCreate, GameRunRead, GameRunUpdate
 from .item import ItemCreate, ItemRead, ItemUpdate
 from .player import PlayerCreate, PlayerRead, PlayerUpdate
@@ -16,4 +17,7 @@ __all__ = [
     "RunItemCreate",
     "RunItemRead",
     "RunItemUpdate",
+    "TokenResponse",
+    "UserRead",
+    "UserRegister",
 ]

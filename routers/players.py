@@ -3,25 +3,22 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.settings.db import get_db
-from models.player import Player
 from schemas.player import PlayerCreate, PlayerRead, PlayerUpdate
+from services.players import PlayerService, get_player_service
+from utils.security import AccessTokenDepend, AdminDepend
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/players", tags=["Players"])
 
-SessionDepend = Annotated[AsyncSession, Depends(get_db)]
+PlayerServiceDepend = Annotated[PlayerService, Depends(get_player_service)]
 
 
 @router.get(path="/", response_model=list[PlayerRead])
-async def get_players(session: SessionDepend):
+async def get_players(player_service: PlayerServiceDepend):
     try:
-        result = await session.execute(select(Player))
-        return result.scalars().all()
+        return await player_service.get_all()
     except HTTPException:
         raise
     except Exception as exc:
@@ -33,10 +30,9 @@ async def get_players(session: SessionDepend):
 
 
 @router.get(path="/{player_id}", response_model=PlayerRead)
-async def get_player(player_id: UUID, session: SessionDepend):
+async def get_player(player_id: UUID, player_service: PlayerServiceDepend):
     try:
-        result = await session.execute(select(Player).where(Player.id == player_id))
-        player = result.scalars().first()
+        player = await player_service.get_by_id(player_id=player_id)
 
         if not player:
             raise HTTPException(
@@ -60,13 +56,13 @@ async def get_player(player_id: UUID, session: SessionDepend):
     response_model=PlayerRead,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_player(player_data: PlayerCreate, session: SessionDepend):
+async def create_player(
+    player_data: PlayerCreate,
+    player_service: PlayerServiceDepend,
+    _token: AccessTokenDepend,
+):
     try:
-        new_player = Player(**player_data.model_dump())
-        session.add(new_player)
-        await session.commit()
-        await session.refresh(new_player)
-        return new_player
+        return await player_service.create(data=player_data)
     except HTTPException:
         raise
     except Exception as exc:
@@ -81,25 +77,19 @@ async def create_player(player_data: PlayerCreate, session: SessionDepend):
 async def update_player(
     player_id: UUID,
     player_update: PlayerUpdate,
-    session: SessionDepend,
+    player_service: PlayerServiceDepend,
+    _token: AccessTokenDepend,
 ):
     try:
-        result = await session.execute(select(Player).where(Player.id == player_id))
-        existing_player = result.scalars().first()
+        player = await player_service.update(player_id=player_id, data=player_update)
 
-        if not existing_player:
+        if not player:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Player not found",
             )
 
-        for field, value in player_update.model_dump(exclude_unset=True).items():
-            setattr(existing_player, field, value)
-
-        session.add(existing_player)
-        await session.commit()
-        await session.refresh(existing_player)
-        return existing_player
+        return player
     except HTTPException:
         raise
     except Exception as exc:
@@ -114,19 +104,20 @@ async def update_player(
     path="/{player_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def delete_player(player_id: UUID, session: SessionDepend):
+async def delete_player(
+    player_id: UUID,
+    player_service: PlayerServiceDepend,
+    _admin: AdminDepend,
+):
     try:
-        result = await session.execute(select(Player).where(Player.id == player_id))
-        existing_player = result.scalars().first()
+        deleted = await player_service.delete(player_id=player_id)
 
-        if not existing_player:
+        if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Player not found",
             )
 
-        await session.delete(existing_player)
-        await session.commit()
         return
     except HTTPException:
         raise

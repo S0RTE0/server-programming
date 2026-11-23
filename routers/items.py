@@ -2,25 +2,22 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.settings.db import get_db
-from models.item import Item
 from schemas.item import ItemCreate, ItemRead, ItemUpdate
+from services.items import ItemService, get_item_service
+from utils.security import AccessTokenDepend, AdminDepend
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/items", tags=["Items"])
 
-SessionDepend = Annotated[AsyncSession, Depends(get_db)]
+ItemServiceDepend = Annotated[ItemService, Depends(get_item_service)]
 
 
 @router.get(path="/", response_model=list[ItemRead])
-async def get_items(session: SessionDepend):
+async def get_items(item_service: ItemServiceDepend):
     try:
-        result = await session.execute(select(Item))
-        return result.scalars().all()
+        return await item_service.get_all()
     except HTTPException:
         raise
     except Exception as exc:
@@ -32,10 +29,9 @@ async def get_items(session: SessionDepend):
 
 
 @router.get(path="/{item_id}", response_model=ItemRead)
-async def get_item(item_id: int, session: SessionDepend):
+async def get_item(item_id: int, item_service: ItemServiceDepend):
     try:
-        result = await session.execute(select(Item).where(Item.id == item_id))
-        item = result.scalars().first()
+        item = await item_service.get_by_id(item_id=item_id)
 
         if not item:
             raise HTTPException(
@@ -59,13 +55,13 @@ async def get_item(item_id: int, session: SessionDepend):
     response_model=ItemRead,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_item(item_data: ItemCreate, session: SessionDepend):
+async def create_item(
+    item_data: ItemCreate,
+    item_service: ItemServiceDepend,
+    _token: AccessTokenDepend,
+):
     try:
-        new_item = Item(**item_data.model_dump())
-        session.add(new_item)
-        await session.commit()
-        await session.refresh(new_item)
-        return new_item
+        return await item_service.create(data=item_data)
     except HTTPException:
         raise
     except Exception as exc:
@@ -80,25 +76,19 @@ async def create_item(item_data: ItemCreate, session: SessionDepend):
 async def update_item(
     item_id: int,
     item_update: ItemUpdate,
-    session: SessionDepend,
+    item_service: ItemServiceDepend,
+    _token: AccessTokenDepend,
 ):
     try:
-        result = await session.execute(select(Item).where(Item.id == item_id))
-        existing_item = result.scalars().first()
+        item = await item_service.update(item_id=item_id, data=item_update)
 
-        if not existing_item:
+        if not item:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Item not found",
             )
 
-        for field, value in item_update.model_dump(exclude_unset=True).items():
-            setattr(existing_item, field, value)
-
-        session.add(existing_item)
-        await session.commit()
-        await session.refresh(existing_item)
-        return existing_item
+        return item
     except HTTPException:
         raise
     except Exception as exc:
@@ -113,19 +103,20 @@ async def update_item(
     path="/{item_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def delete_item(item_id: int, session: SessionDepend):
+async def delete_item(
+    item_id: int,
+    item_service: ItemServiceDepend,
+    _admin: AdminDepend,
+):
     try:
-        result = await session.execute(select(Item).where(Item.id == item_id))
-        existing_item = result.scalars().first()
+        deleted = await item_service.delete(item_id=item_id)
 
-        if not existing_item:
+        if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Item not found",
             )
 
-        await session.delete(existing_item)
-        await session.commit()
         return
     except HTTPException:
         raise
